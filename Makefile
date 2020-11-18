@@ -1,13 +1,22 @@
 GO111MODULE := on
 CGO_ENABLED := 1
-LINKMODE := -extldflags '-static -s -w'
+EXTLDFLAGS := -extldflags '-static -s -w'
 DOCKER_TAG := $(or ${GITHUB_TAG_NAME}, latest)
 BACKUP_PROVIDER := $(or ${BACKUP_PROVIDER},local)
+SHA := $(shell git rev-parse --short=8 HEAD)
+GITVERSION := $(shell git describe --long --all)
+BUILDDATE := $(shell date -Iseconds)
+VERSION := $(or ${VERSION},devel)
 
 .PHONY: all
 all:
 	go mod tidy
-	go build -ldflags "$(LINKMODE)" -tags 'osusergo netgo static_build' -o bin/backup-restore-sidecar github.com/metal-stack/backup-restore-sidecar/cmd
+	go build -ldflags "-X 'github.com/metal-stack/v.Version=$(VERSION)' \
+                           -X 'github.com/metal-stack/v.Revision=$(GITVERSION)' \
+                           -X 'github.com/metal-stack/v.GitSHA1=$(SHA)' \
+                           -X 'github.com/metal-stack/v.BuildDate=$(BUILDDATE)' \
+                           $(EXTLDFLAGS)" \
+                           -tags 'osusergo netgo static_build' -o bin/backup-restore-sidecar github.com/metal-stack/backup-restore-sidecar/cmd
 	strip bin/backup-restore-sidecar
 
 .PHONY: proto
