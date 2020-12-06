@@ -82,6 +82,7 @@ func (b *BackupProviderLocal) DownloadBackup(version *providers.BackupVersion) e
 	b.log.Infow("download backup called for provider local")
 	source := filepath.Join(b.config.LocalBackupPath, version.Name)
 	destination := filepath.Join(constants.DownloadDir, version.Name)
+
 	err := utils.Copy(source, destination)
 	if err != nil {
 		return err

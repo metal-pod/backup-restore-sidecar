@@ -207,7 +207,6 @@ func (b *BackupProviderS3) DownloadBackup(version *providers.BackupVersion) erro
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -237,7 +236,6 @@ func (b *BackupProviderS3) UploadBackup(sourcePath string) error {
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 

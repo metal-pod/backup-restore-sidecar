@@ -12,6 +12,7 @@ import (
 	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/compress"
 	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/constants"
 	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/database"
+	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/encryption"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -30,19 +31,21 @@ type Initializer struct {
 	db            database.Database
 	bp            providers.BackupProvider
 	comp          *compress.Compressor
+	encrypter     *encryption.Encrypter
 }
 
-func New(log *zap.SugaredLogger, addr string, db database.Database, bp providers.BackupProvider, comp *compress.Compressor) *Initializer {
+func New(log *zap.SugaredLogger, addr string, db database.Database, bp providers.BackupProvider, comp *compress.Compressor, encrypter *encryption.Encrypter) *Initializer {
 	return &Initializer{
 		currentStatus: &v1.StatusResponse{
 			Status:  v1.StatusResponse_CHECKING,
 			Message: "starting initializer server",
 		},
-		log:  log,
-		addr: addr,
-		db:   db,
-		bp:   bp,
-		comp: comp,
+		log:       log,
+		addr:      addr,
+		db:        db,
+		bp:        bp,
+		comp:      comp,
+		encrypter: encrypter,
 	}
 }
 
@@ -133,7 +136,7 @@ func (i *Initializer) initialize() error {
 		return nil
 	}
 
-	err = i.Restore(latestBackup)
+	err = i.Restore(latestBackup, false)
 	if err != nil {
 		return errors.Wrap(err, "unable to restore database")
 	}
@@ -142,7 +145,7 @@ func (i *Initializer) initialize() error {
 }
 
 // Restore restores the database with the given backup version
-func (i *Initializer) Restore(version *providers.BackupVersion) error {
+func (i *Initializer) Restore(version *providers.BackupVersion, downloadOnly bool) error {
 	i.log.Infow("restoring backup", "version", version.Version, "date", version.Date.String())
 
 	i.currentStatus.Status = v1.StatusResponse_RESTORING
@@ -172,10 +175,21 @@ func (i *Initializer) Restore(version *providers.BackupVersion) error {
 		return errors.Wrap(err, "unable to download backup")
 	}
 
+	if i.encrypter != nil {
+		backupFilePath, err = i.encrypter.Decrypt(backupFilePath)
+		if err != nil {
+			return errors.Wrap(err, "unable to decrypt backup")
+		}
+	}
+
 	i.currentStatus.Message = "uncompressing backup"
 	err = i.comp.Decompress(backupFilePath)
 	if err != nil {
 		return errors.Wrap(err, "unable to uncompress backup")
+	}
+	if downloadOnly {
+		i.log.Info("downloadOnly was specified, skipping database recovery")
+		return nil
 	}
 
 	i.currentStatus.Message = "restoring backup"

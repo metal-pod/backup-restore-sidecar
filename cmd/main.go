@@ -17,6 +17,7 @@ import (
 	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/database"
 	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/database/postgres"
 	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/database/rethinkdb"
+	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/encryption"
 	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/initializer"
 	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/metrics"
 	"github.com/metal-stack/backup-restore-sidecar/cmd/internal/probe"
@@ -43,6 +44,7 @@ const (
 
 	databaseFlg        = "db"
 	databaseDatadirFlg = "db-data-directory"
+	downloadOnlyFlg    = "download-only"
 
 	postgresUserFlg     = "postgres-user"
 	postgresHostFlg     = "postgres-host"
@@ -71,6 +73,8 @@ const (
 	s3SecretKeyFlg  = "s3-secret-key"
 
 	compressionMethod = "compression-method"
+
+	encryptionKey = "encryption-key"
 )
 
 var (
@@ -110,13 +114,21 @@ var startCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		initializer.New(logger.Named("initializer"), addr, db, bp, comp).Start(stop)
+		var encrypter *encryption.Encrypter
+		key := viper.GetString(encryptionKey)
+		if key != "" {
+			encrypter, err = encryption.New(logger.Named("encryption"), key)
+			if err != nil {
+				return fmt.Errorf("unable to initialize encryption:%v", err)
+			}
+		}
+		initializer.New(logger.Named("initializer"), addr, db, bp, comp, encrypter).Start(stop)
 		if err := probe.Start(logger.Named("probe"), db, stop); err != nil {
 			return err
 		}
 		metrics := metrics.New()
 		metrics.Start(logger.Named("metrics"))
-		return backup.Start(logger.Named("backup"), viper.GetString(backupCronScheduleFlg), db, bp, metrics, comp, stop)
+		return backup.Start(logger.Named("backup"), viper.GetString(backupCronScheduleFlg), db, bp, metrics, comp, encrypter, stop)
 	},
 }
 
@@ -142,7 +154,16 @@ var restoreCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return initializer.New(logger.Named("initializer"), "", db, bp, comp).Restore(version)
+		var encrypter *encryption.Encrypter
+		key := viper.GetString(encryptionKey)
+		if key != "" {
+			encrypter, err = encryption.New(logger.Named("encryption"), key)
+			if err != nil {
+				return fmt.Errorf("unable to initialize encryption:%v", err)
+			}
+		}
+		downloadOnly := viper.GetBool(downloadOnlyFlg)
+		return initializer.New(logger.Named("initializer"), "", db, bp, comp, encrypter).Restore(version, downloadOnly)
 	},
 }
 
@@ -226,6 +247,8 @@ func init() {
 
 	startCmd.Flags().StringP(compressionMethod, "", "targz", "the compression method to use to compress the backups (tar|targz|tarlz4)")
 
+	startCmd.Flags().StringP(encryptionKey, "", "", "if given backups will be encrypted with key, must be either 16,24 or 32 byte long")
+
 	err = viper.BindPFlags(startCmd.Flags())
 	if err != nil {
 		fmt.Printf("unable to construct initializer command: %v", err)
@@ -241,6 +264,7 @@ func init() {
 	}
 
 	restoreCmd.AddCommand(restoreListCmd)
+	restoreCmd.Flags().BoolP(downloadOnlyFlg, "", false, "if set, backups are only downloaded, decompressed and decrypted but no database recovery is made.")
 }
 
 func initConfig() {

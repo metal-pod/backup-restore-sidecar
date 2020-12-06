@@ -162,7 +162,6 @@ func (b *BackupProviderGCP) DownloadBackup(version *providers.BackupVersion) err
 	if err != nil {
 		return errors.Wrap(err, "error writing file from gcp to filesystem")
 	}
-
 	return nil
 }
 
